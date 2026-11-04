@@ -628,8 +628,15 @@ def _run_auto_approve_loop(pipeline_id: str, api_token: str) -> None:
         return fallback
 
     def _approve_pending_from_session() -> bool:
-        """若已有待审批则立即调用 API，返回是否执行过审批"""
-        pending_preprod = _collect_pending_for_auto()
+        """若已有待审批则立即调用 API，返回是否审批成功过
+
+        全部失败时返回 False：让调用方走带 sleep 的限速轮询路径，
+        避免审批持续失败（如 token 失效）时无间隔 rerun 打爆 CircleCI API。
+        """
+        pending_preprod = [
+            j for j in _collect_pending_for_auto()
+            if j.get('_workflow_id') and j.get('approval_request_id')
+        ]
         if not pending_preprod:
             return False
         approved, failed = auto_approve_jobs(pending_preprod, api_token)
@@ -638,7 +645,7 @@ def _run_auto_approve_loop(pipeline_id: str, api_token: str) -> None:
             st.toast(f"🤖 已自动审批 {len(approved)} 个 Preprod Job：{names}", icon="✅")
         for j in failed:
             st.toast(f"❌ 自动审批失败: {j.get('name')} — {j.get('_approve_error')}", icon="❌")
-        return True
+        return bool(approved)
 
     auto_status = get_preprod_auto_mode_status(
         workflows, wf_jobs_map, project_name=project_name
