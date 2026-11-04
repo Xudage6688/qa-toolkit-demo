@@ -70,8 +70,8 @@ class TestBuildConflictTips:
 
 def test_build_github_branch_url():
   """GitHub URL 构建"""
-  url = build_github_branch_url("asiainspection", "aca-new", "SP-1/SP-2")
-  assert url == "https://github.com/asiainspection/aca-new/tree/SP-1/SP-2"
+  url = build_github_branch_url("your-org", "aca-new", "SP-1/SP-2")
+  assert url == "https://github.com/your-org/aca-new/tree/SP-1/SP-2"
 
 
 def _mock_response(status_code: int, payload=None, text: str = ""):
@@ -94,7 +94,7 @@ class TestMergeServiceBranchesRemote:
     result = merge_service_branches(
       service="aca-new",
       branches=["SP-1"],
-      organization="asiainspection",
+      organization="your-org",
       github_token="ghp_test",
     )
     assert result.success is False
@@ -114,7 +114,7 @@ class TestMergeServiceBranchesRemote:
     result = merge_service_branches(
       service="aca-new",
       branches=["SP-1", "SP-2"],
-      organization="asiainspection",
+      organization="your-org",
       github_token="ghp_testtoken",
       http_session=session,
     )
@@ -143,7 +143,7 @@ class TestMergeServiceBranchesRemote:
           201,
           {
             "number": 10,
-            "html_url": "https://github.com/asiainspection/aca-new/pull/10",
+            "html_url": "https://github.com/your-org/aca-new/pull/10",
           },
         )
       return _mock_response(400, {"message": f"unexpected post {url}"})
@@ -161,7 +161,7 @@ class TestMergeServiceBranchesRemote:
       result = merge_service_branches(
         service="aca-new",
         branches=["SP-12345", "SP-54321"],
-        organization="asiainspection",
+        organization="your-org",
         github_token="ghp_testtoken",
         create_prs=True,
         http_session=session,
@@ -193,7 +193,7 @@ class TestMergeServiceBranchesRemote:
           201,
           {
             "number": 99,
-            "html_url": "https://github.com/asiainspection/aca-new/pull/99",
+            "html_url": "https://github.com/your-org/aca-new/pull/99",
           },
         )
       return _mock_response(400, {"message": f"unexpected post {url}"})
@@ -204,7 +204,7 @@ class TestMergeServiceBranchesRemote:
     result = merge_service_branches(
       service="aca-new",
       branches=["SP-1", "SP-2"],
-      organization="asiainspection",
+      organization="your-org",
       github_token="ghp_testtoken",
       create_prs=False,
       http_session=session,
@@ -226,7 +226,7 @@ class TestMergeServiceBranchesRemote:
     result = merge_service_branches(
       service="aca-new",
       branches=["SP-1", "SP-2"],
-      organization="asiainspection",
+      organization="your-org",
       github_token="ghp_testtoken",
       force_recreate=False,
       http_session=session,

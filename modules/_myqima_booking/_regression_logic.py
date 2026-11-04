@@ -86,4 +86,12 @@ def apply_case_to_config(base: BookingConfig, case: RegressionCase) -> BookingCo
     ppsso_password=base.ppsso_password,
     ea_variant=case.ea_variant,
     enva_variant=case.enva_variant,
+    enable_factory_section=base.enable_factory_section,
+    inspection_location_type=base.inspection_location_type,
+    inspection_site_factory_name=base.inspection_site_factory_name,
+    date_certainty_type=base.date_certainty_type,
+    long_text_product_name=base.long_text_product_name,
+    long_text_purchase_order=base.long_text_purchase_order,
+    long_product_name_length=base.long_product_name_length,
+    long_purchase_order_length=base.long_purchase_order_length,
   )

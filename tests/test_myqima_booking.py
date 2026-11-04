@@ -8,16 +8,54 @@ sys.path.insert(0, os.path.join(os.path.dirname(__file__), '..'))
 
 from modules._myqima_booking._config_builder import (
   BookingConfig,
+  MYQIMA_PRESET_CUSTOM_LABEL,
+  applyMyqimaTestAccountPreset,
   build_ppsso_url,
+  loadMyqimaTestAccountPresets,
+  myqimaTestAccountPresetOptions,
+  resolveMyqimaPresetLabelForUsername,
   LOB_BOOKING_TYPES,
   BookingType,
 )
-from modules._myqima_booking._booking_runner import parse_log_line, BookingResult, BookingRunner
+from modules._myqima_booking._booking_runner import (
+  parse_log_line,
+  BookingResult,
+  BookingRunner,
+  playwrightOutputIndicatesRunFinished,
+  sanitizeStdoutLine,
+  formatBookingLogText,
+)
 
 
 def test_build_ppsso_url():
   url = build_ppsso_url("74CA94F460EC470499DCDADC7CB7C001")
   assert url == "https://ppsso.example.com/back-office/v2/company-profile/customer/74CA94F460EC470499DCDADC7CB7C001"
+
+
+def test_load_myqima_test_account_presets_from_repo_file():
+  presets = loadMyqimaTestAccountPresets()
+  assert len(presets) >= 1
+  labels = {p["label"] for p in presets}
+  assert "test_qa" in labels
+
+
+def test_myqima_test_account_preset_helpers():
+  presets = [
+    {"label": "a", "username": "user_a", "password": "pass_a"},
+  ]
+  assert myqimaTestAccountPresetOptions(presets)[0] == MYQIMA_PRESET_CUSTOM_LABEL
+  assert resolveMyqimaPresetLabelForUsername(presets, "user_a") == "a"
+  assert resolveMyqimaPresetLabelForUsername(presets, "other") == MYQIMA_PRESET_CUSTOM_LABEL
+
+  class _FakeState(dict):
+    pass
+
+  state = _FakeState(myqima_direct_user="", myqima_direct_pwd="")
+  applyMyqimaTestAccountPreset("a", presets, state)
+  assert state["myqima_direct_user"] == "user_a"
+  assert state["myqima_direct_pwd"] == "pass_a"
+  applyMyqimaTestAccountPreset(MYQIMA_PRESET_CUSTOM_LABEL, presets, state)
+  assert state["myqima_direct_user"] == "user_a"
 
 
 def test_config_builder_myqima():
@@ -78,6 +116,132 @@ def test_config_builder_enva_variant():
   assert config.to_dict()["envaVariant"] == "HIGG_FEM"
 
 
+def test_config_builder_factory_section_psi():
+  config = BookingConfig(
+    login_type="myqima",
+    booking_type="PSI",
+    enable_factory_section=True,
+    inspection_location_type="no",
+    inspection_site_factory_name="demo-factory",
+  )
+  d = config.to_dict()
+  assert d["factorySection"]["enabled"] is True
+  assert d["factorySection"]["inspectionLocationType"] == "no"
+  assert d["factorySection"]["inspectionSiteFactoryName"] == "demo-factory"
+  assert d["factorySection"]["dateCertaintyType"] == "final_date_confirmed"
+
+
+def test_config_builder_factory_section_date_certainty_tentative():
+  config = BookingConfig(
+    login_type="myqima",
+    booking_type="PSI",
+    enable_factory_section=True,
+    inspection_location_type="yes",
+    date_certainty_type="tentative_date",
+  )
+  assert config.to_dict()["factorySection"]["dateCertaintyType"] == "tentative_date"
+
+
+def test_persist_myqima_user_prefs_factory_section():
+  import tempfile
+  from modules._myqima_booking._config_builder import (
+    persistMyqimaUserPrefs,
+    factorySectionDictForStorage,
+  )
+
+  with tempfile.TemporaryDirectory() as tmp:
+    cfg_path = os.path.join(tmp, "users_config.json")
+    with open(cfg_path, "w", encoding="utf-8") as fh:
+      json.dump({"users": {"Daisy": {"myqima": {}}}}, fh)
+
+    persistMyqimaUserPrefs(
+      cfg_path,
+      "Daisy",
+      playwrightProjectPath="C:\\playwright",
+      factorySection=factorySectionDictForStorage(True, "no", "demo-factory"),
+    )
+
+    with open(cfg_path, encoding="utf-8") as fh:
+      data = json.load(fh)
+    myqima = data["users"]["Daisy"]["myqima"]
+    assert myqima["playwright_project_path"] == "C:\\playwright"
+    assert myqima["factorySection"]["enabled"] is True
+    assert myqima["factorySection"]["inspectionLocationType"] == "no"
+    assert myqima["factorySection"]["inspectionSiteFactoryName"] == "demo-factory"
+    assert myqima["factorySection"]["dateCertaintyType"] == "final_date_confirmed"
+
+
+def test_config_builder_factory_section_for_inspection_clc():
+  config = BookingConfig(
+    login_type="myqima",
+    booking_type="CLC",
+    enable_factory_section=True,
+    inspection_location_type="yes",
+  )
+  assert config.to_dict()["factorySection"]["enabled"] is True
+
+
+def test_config_builder_factory_section_ignored_for_audit():
+  config = BookingConfig(
+    login_type="myqima",
+    booking_type="EA",
+    enable_factory_section=True,
+    inspection_location_type="yes",
+  )
+  assert "factorySection" not in config.to_dict()
+
+
+def test_config_builder_long_text_fields_inspection():
+  config = BookingConfig(
+    login_type="myqima",
+    booking_type="PSI",
+    long_text_product_name=True,
+    long_text_purchase_order=True,
+    long_product_name_length=1200,
+    long_purchase_order_length=600,
+  )
+  lt = config.to_dict()["longTextFields"]
+  assert lt["productName"] is True
+  assert lt["productNameLength"] == 1200
+  assert lt["purchaseOrder"] is True
+  assert lt["purchaseOrderLength"] == 600
+
+
+def test_config_builder_long_text_fields_ignored_for_audit():
+  config = BookingConfig(
+    login_type="myqima",
+    booking_type="EA",
+    long_text_product_name=True,
+  )
+  assert "longTextFields" not in config.to_dict()
+
+
+def test_persist_myqima_user_prefs_long_text_fields():
+  import tempfile
+  from modules._myqima_booking._config_builder import (
+    persistMyqimaUserPrefs,
+    longTextFieldsDictForStorage,
+  )
+
+  with tempfile.TemporaryDirectory() as tmp:
+    cfg_path = os.path.join(tmp, "users_config.json")
+    with open(cfg_path, "w", encoding="utf-8") as fh:
+      json.dump({"users": {"Daisy": {"myqima": {}}}}, fh)
+
+    persistMyqimaUserPrefs(
+      cfg_path,
+      "Daisy",
+      longTextFields=longTextFieldsDictForStorage(True, False, 400, 200),
+    )
+
+    with open(cfg_path, encoding="utf-8") as fh:
+      data = json.load(fh)
+    lt = data["users"]["Daisy"]["myqima"]["longTextFields"]
+    assert lt["productName"] is True
+    assert lt["purchaseOrder"] is False
+    assert lt["productNameLength"] == 400
+
+
 def test_lob_booking_types_structure():
   assert "Inspection" in LOB_BOOKING_TYPES
   assert "Audit" in LOB_BOOKING_TYPES
@@ -105,6 +269,22 @@ def test_booking_type_enum_values():
   assert BookingType("EA") == "EA"
 
 
+
+
+def test_sanitize_stdout_line_filters_blanks():
+  assert sanitizeStdoutLine("  \r\n") is None
+  assert sanitizeStdoutLine("\x1b[31m[17:31:54] ok\x1b[0m") == "[17:31:54] ok"
+
+
+def test_format_booking_log_text_skips_empty_rows():
+  text = formatBookingLogText(["line1", "", "  ", "line2"], tail=10)
+  assert text == "line1\nline2"
+
+
+def test_playwright_output_indicates_run_finished():
+  assert playwrightOutputIndicatesRunFinished("  1 passed (1.7m)")
+  assert playwrightOutputIndicatesRunFinished("[16:56:26] 下单完成，共 1 个产品")
+  assert not playwrightOutputIndicatesRunFinished("[16:56:26] 登录 — 开始")
 
 
 def test_parse_log_line_order_id():

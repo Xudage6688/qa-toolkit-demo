@@ -6,6 +6,11 @@
 from typing import Callable, Dict, List, Optional, Tuple
 
 from circleCi.pipeline_data import approve_job
+from circleCi.project_job_match import (
+    PENDING_APPROVAL_STATUSES,
+    job_matches_project,
+    job_name_matches_target_env,
+)
 
 # 处于这些状态的 workflow 视为「未结束」，自动轮询继续
 ACTIVE_WORKFLOW_STATUSES = {'running', 'queued', 'on_hold', 'failing'}
@@ -13,14 +18,9 @@ ACTIVE_WORKFLOW_STATUSES = {'running', 'queued', 'on_hold', 'failing'}
 # Preprod 部署 Job 名称子串（如 deploy-docker-image-on-preprod-aca-new）
 PREPROD_DEPLOY_JOB_SUBSTR = 'deploy-docker-image-on-preprod'
 
-# 部署 Job 仍在进行中的状态
-IN_PROGRESS_JOB_STATUSES = {'running', 'queued'}
-
-# 部署 Job 尚未开始（CircleCI 在审批前常显示 blocked / not_running）
-DEPLOY_NOT_STARTED_STATUSES = {'blocked', 'not_running', 'not_run', 'on_hold'}
-
 # preprod 自动模式状态（get_preprod_auto_mode_status 返回值）
 PREPROD_AUTO_POLLING = 'polling'
+PREPROD_AUTO_APPROVAL_SUCCESS = 'approval_success'
 PREPROD_AUTO_DEPLOY_SUCCESS = 'deploy_success'
 PREPROD_AUTO_DEPLOY_FAILED = 'deploy_failed'
 PREPROD_AUTO_IDLE = 'idle'
@@ -30,6 +30,7 @@ def find_pending_preprod_approvals(
     workflows: Optional[List[Dict]],
     wf_jobs_map: Dict[str, List[Dict]],
     target_env: str = 'preprod',
+    project_name: Optional[str] = None,
 ) -> List[Dict]:
     """从 workflows + jobs 映射中筛选目标环境的待审批 approval Job
 
@@ -40,23 +41,40 @@ def find_pending_preprod_approvals(
         workflows: workflow 列表（每项含 id/name/status）
         wf_jobs_map: workflow_id -> jobs 列表
         target_env: 目标环境关键字（小写子串匹配 job 名）
+        project_name: 可选；带服务名的 Job 须匹配该项目；``*-cloud`` 还支持无服务名的
+            按环境审批（如 deploy on Preprod）。多服务管道用服务名区分（如 aca-new / lab-photos）
 
     Returns:
         待审批 job 列表
     """
     pending = []
-    env = target_env.lower()
     for wf in (workflows or []):
         wf_id = wf.get('id')
         for job in wf_jobs_map.get(wf_id, []):
-            if job.get('type') != 'approval' or job.get('status') != 'on_hold':
-                continue
-            if env not in job.get('name', '').lower():
+            if not _is_scoped_preprod_approval_pending(
+                job, project_name=project_name, target_env=target_env
+            ):
                 continue
             job['_workflow_id'] = wf_id
             job['_workflow_name'] = wf.get('name')
             pending.append(job)
     return pending
+
+
+def _is_scoped_preprod_approval_pending(
+    job: Dict,
+    project_name: Optional[str] = None,
+    target_env: str = 'preprod',
+) -> bool:
+    """是否为当前项目、目标环境下待审批的 approval Job"""
+    if job.get('type') != 'approval':
+        return False
+    if job.get('status') not in PENDING_APPROVAL_STATUSES:
+        return False
+    job_name = job.get('name', '')
+    if not job_name_matches_target_env(job_name, target_env):
+        return False
+    return job_matches_project(job_name, project_name)
 
 
 def auto_approve_jobs(
@@ -101,123 +119,58 @@ def has_active_workflows(workflows: Optional[List[Dict]]) -> bool:
     )
 
 
-def _is_preprod_approval_job(job: Dict) -> bool:
+def _is_preprod_approval_job(job: Dict, project_name: Optional[str] = None) -> bool:
     """是否为 preprod 环境的 approval Job"""
-    return (
-        job.get('type') == 'approval'
-        and 'preprod' in job.get('name', '').lower()
-    )
+    job_name = job.get('name', '')
+    if job.get('type') != 'approval':
+        return False
+    if not job_name_matches_target_env(job_name, 'preprod'):
+        return False
+    return job_matches_project(job_name, project_name)
 
 
-def _is_preprod_deploy_job(job: Dict) -> bool:
-    """是否为 preprod 镜像部署 Job"""
-    return PREPROD_DEPLOY_JOB_SUBSTR in job.get('name', '').lower()
-
-
-def _collect_preprod_deploy_jobs(
+def _iter_scoped_preprod_approval_jobs(
     workflows: Optional[List[Dict]],
     wf_jobs_map: Dict[str, List[Dict]],
-) -> List[Tuple[Dict, Dict]]:
-    """收集 workflow 与 preprod 部署 Job 对"""
-    pairs: List[Tuple[Dict, Dict]] = []
+    project_name: Optional[str] = None,
+) -> List[Dict]:
+    """收集与 project 筛选条件匹配的 preprod approval Job"""
+    jobs: List[Dict] = []
     for wf in (workflows or []):
         wf_id = wf.get('id')
         for job in wf_jobs_map.get(wf_id, []):
-            if _is_preprod_deploy_job(job):
-                pairs.append((wf, job))
-    return pairs
+            if _is_preprod_approval_job(job, project_name):
+                jobs.append(job)
+    return jobs
 
 
 def get_preprod_auto_mode_status(
     workflows: Optional[List[Dict]],
     wf_jobs_map: Dict[str, List[Dict]],
+    project_name: Optional[str] = None,
 ) -> str:
     """preprod 自动模式应处的状态
 
     返回:
-        polling — 继续 10 秒轮询
-        deploy_success — preprod 部署已成功结束，停止轮询
-        deploy_failed — preprod 部署失败，停止轮询
-        idle — 无 preprod 相关工作且 Pipeline 已结束
+        polling — 继续 10 秒轮询（等待 preprod 审批出现或待审批）
+        approval_success — 当前范围内 preprod 审批已通过，停止轮询
+        idle — Pipeline 已结束且未出现相关 preprod 审批
 
     停止策略:
-        - 出现 deploy-docker-image-on-preprod-* 且全部达终态后停止
-          （即使 Workflow 仍在等待 staging/prod 审批）
-        - 若同一 Workflow 内多个顺序部署 Job：在 Workflow 仍为 running 且
-          当前可见的 preprod 部署 Job 均已 success 时继续轮询，等待后续 Job 出现
+        - 匹配的 preprod approval Job 为 success 后即停止，不等待部署 Job
+        - 限定项目名时仅看该项目的 preprod 审批（如 aca-new 不受 lab-photos 影响）
     """
-    found_preprod_deploy = False
-    found_any_preprod_signal = False
+    approvals = _iter_scoped_preprod_approval_jobs(
+        workflows, wf_jobs_map, project_name
+    )
 
-    for wf in (workflows or []):
-        wf_id = wf.get('id')
-        for job in wf_jobs_map.get(wf_id, []):
-            if _is_preprod_approval_job(job):
-                found_any_preprod_signal = True
-                if job.get('status') == 'on_hold':
-                    return PREPROD_AUTO_POLLING
+    if any(job.get('status') in PENDING_APPROVAL_STATUSES for job in approvals):
+        return PREPROD_AUTO_POLLING
 
-            if _is_preprod_deploy_job(job):
-                found_preprod_deploy = True
-                found_any_preprod_signal = True
-                if job.get('status') in IN_PROGRESS_JOB_STATUSES:
-                    return PREPROD_AUTO_POLLING
+    if any(job.get('status') == 'success' for job in approvals):
+        return PREPROD_AUTO_APPROVAL_SUCCESS
 
-    if found_preprod_deploy:
-        deploy_pairs = _collect_preprod_deploy_jobs(workflows, wf_jobs_map)
-        if any(job.get('status') == 'failed' for _, job in deploy_pairs):
-            return PREPROD_AUTO_DEPLOY_FAILED
-
-        if any(
-            job.get('status') in IN_PROGRESS_JOB_STATUSES for _, job in deploy_pairs
-        ):
-            return PREPROD_AUTO_POLLING
-
-        if any(
-            job.get('status') in DEPLOY_NOT_STARTED_STATUSES for _, job in deploy_pairs
-        ):
-            return PREPROD_AUTO_POLLING
-
-        success_deploys = [
-            job for _, job in deploy_pairs if job.get('status') == 'success'
-        ]
-        if not success_deploys:
-            return (
-                PREPROD_AUTO_POLLING
-                if has_active_workflows(workflows)
-                else PREPROD_AUTO_IDLE
-            )
-
-        for wf in (workflows or []):
-            wf_id = wf.get('id')
-            wf_deploy_jobs = [
-                j for j in wf_jobs_map.get(wf_id, []) if _is_preprod_deploy_job(j)
-            ]
-            if not wf_deploy_jobs:
-                continue
-            if wf.get('status') == 'running' and all(
-                j.get('status') == 'success' for j in wf_deploy_jobs
-            ):
-                return PREPROD_AUTO_POLLING
-
-        return PREPROD_AUTO_DEPLOY_SUCCESS
-
-    for wf in (workflows or []):
-        wf_id = wf.get('id')
-        jobs = wf_jobs_map.get(wf_id, [])
-        approval_done = any(
-            _is_preprod_approval_job(j) and j.get('status') == 'success'
-            for j in jobs
-        )
-        has_deploy = any(_is_preprod_deploy_job(j) for j in jobs)
-        if (
-            approval_done
-            and not has_deploy
-            and wf.get('status') in ACTIVE_WORKFLOW_STATUSES
-        ):
-            return PREPROD_AUTO_POLLING
-
-    if not found_any_preprod_signal and has_active_workflows(workflows):
+    if has_active_workflows(workflows):
         return PREPROD_AUTO_POLLING
 
     return PREPROD_AUTO_IDLE
@@ -226,6 +179,10 @@ def get_preprod_auto_mode_status(
 def has_pending_preprod_work(
     workflows: Optional[List[Dict]],
     wf_jobs_map: Dict[str, List[Dict]],
+    project_name: Optional[str] = None,
 ) -> bool:
     """是否仍有 preprod 审批/部署相关的未完成工作（需继续自动轮询）"""
-    return get_preprod_auto_mode_status(workflows, wf_jobs_map) == PREPROD_AUTO_POLLING
+    return (
+        get_preprod_auto_mode_status(workflows, wf_jobs_map, project_name)
+        == PREPROD_AUTO_POLLING
+    )

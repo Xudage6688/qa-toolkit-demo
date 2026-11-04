@@ -10,6 +10,7 @@ from circleCi.pipeline_list_view import render_pipeline_list_tab
 from circleCi.monitor_view import render_monitor_tab
 from circleCi.commit_search_view import render_commit_search_tab
 from circleCi.batch_ops_view import render_batch_ops_tab
+from circleCi.branch_merge_view import render_branch_merge_tab
 
 # 导入用户配置
 from modules.user_config_loader import get_circleci_config, get_user_config_loader
@@ -90,15 +91,6 @@ with st.sidebar:
     else:
         st.write("暂无历史记录")
 
-# 创建标签页导航
-tab1, tab2, tab3, tab4, tab5 = st.tabs([
-    "🎯 触发Pipeline",
-    "📋 Pipeline列表",
-    "📊 监控Pipeline",
-    "🔍 Commit ID 搜索",
-    "📦 批量操作"
-])
-
 # 侧边栏设置（Tab 外）
 with st.sidebar:
     st.subheader("⚙️ 设置")
@@ -119,8 +111,38 @@ with st.sidebar:
     st.caption(f"🏢 Organization: {ORGANIZATION}")
     st.caption(f"📦 VCS: {VCS_TYPE}")
 
-# Tab 1: 触发 Pipeline
-with tab1:
+# 单选导航：只渲染当前 Tab，避免 st.tabs 多面板叠显
+TAB_TRIGGER = "🎯 触发Pipeline"
+TAB_LIST = "📋 Pipeline列表"
+TAB_MONITOR = "📊 监控Pipeline"
+TAB_COMMIT = "🔍 Commit ID 搜索"
+TAB_BATCH = "📦 批量操作"
+TAB_MERGE = "🔀 合分支"
+TAB_OPTIONS = [TAB_TRIGGER, TAB_LIST, TAB_MONITOR, TAB_COMMIT, TAB_BATCH, TAB_MERGE]
+
+# GitHub Token（合分支 Tab 使用）
+_user_full_config = get_user_config_loader().get_user_config(current_user) or {}
+GITHUB_TOKEN = (_user_full_config.get("github") or {}).get("token", "")
+
+# 从列表/搜索跳转监控时，自动切到监控 Tab
+if st.session_state.get('pending_tab3_monitor'):
+    st.session_state.circleci_active_tab = TAB_MONITOR
+
+if st.session_state.circleci_active_tab not in TAB_OPTIONS:
+    st.session_state.circleci_active_tab = TAB_TRIGGER
+
+active_tab = st.segmented_control(
+    "功能导航",
+    options=TAB_OPTIONS,
+    key="circleci_active_tab",
+    label_visibility="collapsed",
+    required=True,
+    width="stretch"
+)
+
+st.markdown("---")
+
+if active_tab == TAB_TRIGGER:
     render_trigger_tab(
         project_root=project_root,
         vcs_type=VCS_TYPE,
@@ -129,9 +151,7 @@ with tab1:
         default_branch=DEFAULT_BRANCH,
         api_token=CIRCLECI_API_TOKEN
     )
-
-# Tab 2: Pipeline 列表
-with tab2:
+elif active_tab == TAB_LIST:
     render_pipeline_list_tab(
         project_root=project_root,
         vcs_type=VCS_TYPE,
@@ -139,13 +159,9 @@ with tab2:
         default_project=DEFAULT_PROJECT,
         api_token=CIRCLECI_API_TOKEN
     )
-
-# Tab 3: 监控 Pipeline
-with tab3:
+elif active_tab == TAB_MONITOR:
     render_monitor_tab(api_token=CIRCLECI_API_TOKEN)
-
-# Tab 4: Commit ID 搜索
-with tab4:
+elif active_tab == TAB_COMMIT:
     render_commit_search_tab(
         project_root=project_root,
         default_project=DEFAULT_PROJECT,
@@ -153,15 +169,20 @@ with tab4:
         organization=ORGANIZATION,
         api_token=CIRCLECI_API_TOKEN
     )
-
-# Tab 5: 批量操作
-with tab5:
+elif active_tab == TAB_BATCH:
     render_batch_ops_tab(
         project_root=project_root,
         default_project=DEFAULT_PROJECT,
         vcs_type=VCS_TYPE,
         organization=ORGANIZATION,
         api_token=CIRCLECI_API_TOKEN
+    )
+elif active_tab == TAB_MERGE:
+    render_branch_merge_tab(
+        project_root=project_root,
+        organization=ORGANIZATION,
+        default_project=DEFAULT_PROJECT,
+        github_token=GITHUB_TOKEN,
     )
 
 # 底部功能说明
@@ -179,7 +200,7 @@ st.markdown("""
 
 #### 📋 Pipeline 列表（Tab2）
 1. 选择项目名称，可选填写分支名称（留空查所有分支）
-2. 点击 **"🔍 查询 Pipelines"** 查看最近 10 条 Pipeline 记录
+2. 选择显示条数（默认 10，可选 20 / 40 / 100），点击 **"🔍 查询 Pipelines"** 查看记录
 3. 查看每个 Pipeline 的分支、触发者、提交信息
 4. **分支** 可点击文本框选中后 Ctrl+C 复制
 5. 点击 **"📊 监控"** 按钮，自动跳转 Tab3 并填入 Pipeline ID
@@ -190,6 +211,7 @@ st.markdown("""
 3. 查看 Workflows / Jobs 统计面板（成功/失败/运行中/待审批）
 4. **Preprod 审批项自动展开**，可直接在页面内完成审批
 5. 无需切换 Tab，审批后自动刷新状态
+6. 打开「🔄 刷新」旁的 **"🤖 自动刷新并审批 Preprod"** 开关：每 10 秒自动刷新，仅自动通过**当前 Pipeline 项目名**且名称含 `preprod` 的待审批 Job（如 `aca-new` 不会自动批 `lab-photos`），该项目 preprod **审批通过后**自动待机（不等待部署）
 
 #### ✅ 审批面板（Tab3 内嵌）
 - 待审批 Jobs 自动展示，Preprod 环境 Jobs 默认展开
@@ -206,12 +228,21 @@ st.markdown("""
 
 #### 📦 批量操作（Tab5）
 1. **快捷选择**: 点击「选择 ACA 服务组」一键选择20个服务
-2. **批量触发**: 选择多个服务，输入目标分支（默认 master）
+2. **同分支批量**: 在「🚀 同分支批量触发」子 Tab 选择多个服务，输入统一目标分支
+2.5. **多分支批量**: 切换到「🔀 多分支批量触发」子 Tab，粘贴 `服务:分支` 键值对或使用表格逐行配置
 3. 点击 **"🚀 开始批量触发"** 并发触发所有服务
 4. 查看触发结果统计（成功/失败列表）
 5. 点击 **"🔍 扫描待审批 Jobs"** 查找所有待审批的 Preprod Jobs
 6. 点击 **"✅ 执行批量审批"** 一键审批所有待审批 Jobs
 7. 支持单独审批每个 Job，或批量审批全部
+
+#### 🔀 合分支（Tab6）
+1. 选择服务（如 `aca-new`），确认已配置 GitHub Token（`users_config.json` → `github.token`，需 repo 权限）
+2. 输入 2 个及以上分支名（第一个为基分支），支持换行/空格/逗号分隔
+3. 预览目标合并分支名（如 `merge/SP-12345/SP-54321`，带 `merge/` 前缀避免与源分支冲突）
+4. 默认以 **GitHub PR** 形式在远端顺序 Merge（不 clone 到本机）
+5. 点击 **"🚀 开始远程合并"**；冲突时会自动创建冲突 PR，可在 GitHub 网页解决
+6. 成功后可打开合并分支链接，或切到「触发 Pipeline」继续构建
 
 #### 💡 简化输入说明
 - ✅ **只需输入项目名**: `your-project`（不是完整路径）
@@ -221,9 +252,10 @@ st.markdown("""
 
 #### ⚙️ 注意事项
 - 确保在 `config/users_config.json` 中配置了正确的 API Token
-- Tab2 最多显示 10 条 Pipeline 记录，按最新时间排序
+- Tab2 默认显示 10 条 Pipeline，可选 20 / 40 / 100，按最新时间排序；条数越大越慢（含审批详情查询）
 - Tab3 审批面板仅展示当前 Pipeline 的待审批 Jobs
 - Tab4 搜索所有服务约需 10-15 秒，最多返回 100 条结果
 - Tab5 批量触发使用5并发，约需 30-60 秒完成
+- Tab6 合分支通过 GitHub API/PR 远程完成，不占用本机磁盘克隆；Token 需 repo 权限
 - 可以在侧边栏查看最近 5 次触发的历史记录
 """)

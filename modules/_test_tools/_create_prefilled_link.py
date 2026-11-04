@@ -13,9 +13,9 @@ import requests
 
 
 API_ENDPOINTS: Dict[str, str] = {
-  "DEV": "https://api-gateway.qcore-dev.qima.com/exchange-service/v1.0/pre-payment/links",
-  "PP": "https://api-gateway.qcore-preprod.qima.com/exchange-service/v1.0/pre-payment/links",
-  "PROD": "https://api-gateway.qima.com/exchange-service/v1.0/pre-payment/links",
+  "DEV": "https://api-gateway.dev.example.com/exchange-service/v1.0/pre-payment/links",
+  "PP": "https://api-gateway.preprod.example.com/exchange-service/v1.0/pre-payment/links",
+  "PROD": "https://api-gateway.example.com/exchange-service/v1.0/pre-payment/links",
 }
 
 DEFAULT_HEADERS: Dict[str, str] = {
@@ -27,20 +27,20 @@ DEFAULT_HEADERS: Dict[str, str] = {
 }
 
 DEFAULT_FIELDS: Dict[str, Any] = {
-  "companyName": "QIMA_DAISY_LIU_CLIENT",
-  "contactEmail": "daisy.liu@qima.com",
-  "contactName": "Daisy Test",
+  "companyName": "DEMO_CLIENT",
+  "contactEmail": "demo.user@example.com",
+  "contactName": "Demo Test",
   "bu": "qima",
   "currency": "USD",
   "processingFee": 0,
   "sourceSystem": "NS",
-  "customerId": "5C9B1F313EE14F95B79372F950F88165",
+  "customerId": "00000000000000000000000000000000",
   "percentDiscount": 0.05,
   "remark": "Payment discount test",
 }
 
 DEFAULT_INVOICE_URL = (
-  "https://yd125.oss-cn-hongkong.aliyuncs.com/QISHUI_yinyue_uia_X64_131689.zip"
+  "https://example.com/sample-invoice.pdf"
 )
 
 

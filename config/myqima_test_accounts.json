@@ -1,0 +1,10 @@
+{
+  "accounts": [
+    {
+      "label": "test_qa",
+      "username": "test_qa",
+      "password": "test_qa",
+      "note": "测试账号"
+    }
+  ]
+}

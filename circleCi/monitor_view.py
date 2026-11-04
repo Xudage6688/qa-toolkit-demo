@@ -20,14 +20,32 @@ from circleCi.auto_approve import (
     find_pending_preprod_approvals,
     auto_approve_jobs,
     get_preprod_auto_mode_status,
+    _is_scoped_preprod_approval_pending,
     PREPROD_AUTO_POLLING,
-    PREPROD_AUTO_DEPLOY_SUCCESS,
-    PREPROD_AUTO_DEPLOY_FAILED,
+    PREPROD_AUTO_APPROVAL_SUCCESS,
     PREPROD_AUTO_IDLE,
 )
 
 AUTO_REFRESH_INTERVAL_SECONDS = 10
-AUTO_APPROVE_MAX_ITERATIONS = 30
+
+
+def _get_monitor_project_name() -> str | None:
+    """从已缓存的 Pipeline 数据解析 CircleCI 项目短名（如 public-api-cloud）"""
+    pipeline_data = st.session_state.get('tab3_pipeline_data') or {}
+    project_slug = pipeline_data.get('project_slug') or ''
+    if not project_slug:
+        project_slug = (pipeline_data.get('project') or {}).get('slug', '')
+    if not project_slug:
+        project_slug = st.session_state.get('query_project_slug') or ''
+    if not project_slug:
+        project_name = (
+            st.session_state.get('trigger_project')
+            or st.session_state.get('query_project')
+        )
+        if project_name:
+            return str(project_name)
+        return None
+    return project_slug.split('/')[-1] if '/' in project_slug else project_slug
 
 
 def _on_auto_approve_toggle_change() -> None:
@@ -165,7 +183,6 @@ def _display_cached_pipeline(pipeline_id: str, api_token: str) -> None:
     pipeline_data = st.session_state.tab3_pipeline_data
     workflows = st.session_state.tab3_workflows
     wf_jobs_map = st.session_state.tab3_wf_jobs_map
-    pending_approvals = st.session_state.tab3_pending_approvals
 
     _render_pipeline_info(pipeline_data)
     st.markdown("---")
@@ -181,7 +198,7 @@ def _display_cached_pipeline(pipeline_id: str, api_token: str) -> None:
 
     st.markdown("---")
     st.subheader("✅ 审批面板")
-    _render_approval_panel_content(pending_approvals, api_token=api_token)
+    _render_approval_panel(pipeline_id, api_token)
 
 
 def _render_pipeline_info(pipeline_data: dict) -> None:
@@ -304,8 +321,9 @@ def _render_workflows_header(pipeline_id: str, api_token: str, workflows: list) 
             key="tab3_auto_approve_preprod",
             on_change=_on_auto_approve_toggle_change,
             help=f"开启后每 {AUTO_REFRESH_INTERVAL_SECONDS} 秒自动刷新；"
-                 "出现名称含 preprod 的待审批 Job 时自动通过，"
-                 "deploy-docker-image-on-preprod 部署成功后自动停止",
+                 "每个环境仅一个 preprod 审批：带服务名须匹配当前项目（含 *-cloud 短名），"
+                 "或 *-cloud 单服务常见的「deploy on Preprod」按环境审批；"
+                 "aca-new 等多服务须 Job 含服务名，不会误批 lab-photos；通过后自动停止",
         )
 
 
@@ -542,10 +560,8 @@ def _render_auto_mode_standby(status: str) -> None:
     Args:
         status: get_preprod_auto_mode_status 返回值
     """
-    if status == PREPROD_AUTO_DEPLOY_SUCCESS:
-        st.caption("🤖 自动模式待机中：Preprod 部署已完成")
-    elif status == PREPROD_AUTO_DEPLOY_FAILED:
-        st.caption("🤖 自动模式已停止：Preprod 部署失败")
+    if status == PREPROD_AUTO_APPROVAL_SUCCESS:
+        st.caption("🤖 自动模式待机中：Preprod 审批已完成")
     elif status == PREPROD_AUTO_IDLE:
         st.caption("🤖 自动模式待机中：无 Preprod 相关任务")
 
@@ -556,10 +572,8 @@ def _toast_auto_mode_stopped(status: str) -> None:
     Args:
         status: get_preprod_auto_mode_status 返回值
     """
-    if status == PREPROD_AUTO_DEPLOY_SUCCESS:
-        st.toast("🤖 Preprod 部署已完成，自动模式待机", icon="✅")
-    elif status == PREPROD_AUTO_DEPLOY_FAILED:
-        st.toast("🤖 Preprod 部署失败，自动模式已停止", icon="❌")
+    if status == PREPROD_AUTO_APPROVAL_SUCCESS:
+        st.toast("🤖 Preprod 审批已完成，自动模式待机", icon="✅")
 
 
 def _run_auto_approve_loop(pipeline_id: str, api_token: str) -> None:
@@ -568,12 +582,10 @@ def _run_auto_approve_loop(pipeline_id: str, api_token: str) -> None:
     开关（st.session_state.tab3_auto_approve_preprod）开启、当前有缓存
     Pipeline 且仍有 preprod 相关未完成工作时：等待固定间隔 → 刷新数据 →
     自动审批名称含 preprod 的待审批 Job → rerun 进入下一轮。
-    deploy-docker-image-on-preprod 部署成功后停止轮询（即使 Workflow 仍在
-    等待 staging/prod 审批）。
+    当前项目 preprod 审批通过后停止轮询（不等待部署 Job）。
 
     注意：不能直接给 toggle 的 session_state key 赋值（widget 实例化后
     Streamlit 会抛 StreamlitAPIException），所以停止轮询只靠提前 return。
-    同时限制最大轮询次数 AUTO_APPROVE_MAX_ITERATIONS，防止异常场景下无限循环。
 
     Args:
         pipeline_id: 当前输入框中的 Pipeline ID
@@ -584,18 +596,6 @@ def _run_auto_approve_loop(pipeline_id: str, api_token: str) -> None:
     if not pipeline_id or st.session_state.get('tab3_cached_pipeline_id') != pipeline_id:
         return
 
-    # 读取轮询计数，首次进入时初始化为 0
-    current_iteration = st.session_state.get('tab3_auto_approve_iteration', 0)
-    if current_iteration == 0:
-        st.session_state.tab3_auto_approve_iteration = 1
-    else:
-        st.session_state.tab3_auto_approve_iteration += 1
-
-    if st.session_state.tab3_auto_approve_iteration > AUTO_APPROVE_MAX_ITERATIONS:
-        st.toast(f"⚠️ 自动审批轮询已达上限（{AUTO_APPROVE_MAX_ITERATIONS} 次），已停止", icon="⚠️")
-        st.session_state.tab3_auto_approve_iteration = 0
-        return
-
     workflows = st.session_state.get('tab3_workflows') or []
     wf_jobs_map = st.session_state.get('tab3_wf_jobs_map') or {}
     if not workflows:
@@ -604,39 +604,94 @@ def _run_auto_approve_loop(pipeline_id: str, api_token: str) -> None:
             return
         st.rerun()
 
-    auto_status = get_preprod_auto_mode_status(workflows, wf_jobs_map)
-    if auto_status != PREPROD_AUTO_POLLING:
-        _render_auto_mode_standby(auto_status)
-        st.session_state.tab3_auto_approve_iteration = 0
-        return
+    project_name = _get_monitor_project_name()
 
-    with st.spinner(
-        f"🤖 自动模式（第 {st.session_state.tab3_auto_approve_iteration}/{AUTO_APPROVE_MAX_ITERATIONS} 轮）："
-        f"{AUTO_REFRESH_INTERVAL_SECONDS} 秒后刷新并检查 preprod 审批..."
-    ):
-        time.sleep(AUTO_REFRESH_INTERVAL_SECONDS)
+    def _collect_pending_for_auto() -> list:
+        """从 workflow 缓存与审批面板缓存收集可自动审批的 preprod Job"""
+        pending_preprod = find_pending_preprod_approvals(
+            st.session_state.tab3_workflows,
+            st.session_state.tab3_wf_jobs_map,
+            project_name=project_name,
+        )
+        if pending_preprod:
+            return pending_preprod
+        seen_ids = {j.get('id') for j in pending_preprod if j.get('id')}
+        fallback = []
+        for job in st.session_state.get('tab3_pending_approvals') or []:
+            if job.get('id') in seen_ids:
+                continue
+            if not _is_scoped_preprod_approval_pending(job, project_name=project_name):
+                continue
+            if not job.get('_workflow_id') or not job.get('approval_request_id'):
+                continue
+            fallback.append(job)
+        return fallback
 
-    _refresh_workflows(pipeline_id, api_token)
-
-    pending_preprod = find_pending_preprod_approvals(
-        st.session_state.tab3_workflows,
-        st.session_state.tab3_wf_jobs_map,
-    )
-    if pending_preprod:
+    def _approve_pending_from_session() -> bool:
+        """若已有待审批则立即调用 API，返回是否执行过审批"""
+        pending_preprod = _collect_pending_for_auto()
+        if not pending_preprod:
+            return False
         approved, failed = auto_approve_jobs(pending_preprod, api_token)
         if approved:
             names = '、'.join(j.get('name', '') for j in approved)
             st.toast(f"🤖 已自动审批 {len(approved)} 个 Preprod Job：{names}", icon="✅")
         for j in failed:
             st.toast(f"❌ 自动审批失败: {j.get('name')} — {j.get('_approve_error')}", icon="❌")
+        return True
+
+    auto_status = get_preprod_auto_mode_status(
+        workflows, wf_jobs_map, project_name=project_name
+    )
+    if auto_status != PREPROD_AUTO_POLLING:
+        _render_auto_mode_standby(auto_status)
+        return
+
+    _refresh_workflows(pipeline_id, api_token)
+    if _approve_pending_from_session():
+        _refresh_workflows(pipeline_id, api_token)
+        auto_status = get_preprod_auto_mode_status(
+            st.session_state.tab3_workflows,
+            st.session_state.tab3_wf_jobs_map,
+            project_name=project_name,
+        )
+        if auto_status != PREPROD_AUTO_POLLING:
+            _toast_auto_mode_stopped(auto_status)
+        st.rerun()
 
     auto_status = get_preprod_auto_mode_status(
         st.session_state.tab3_workflows,
         st.session_state.tab3_wf_jobs_map,
+        project_name=project_name,
     )
     if auto_status != PREPROD_AUTO_POLLING:
-        st.session_state.tab3_auto_approve_iteration = 0
-        _toast_auto_mode_stopped(auto_status)
+        _render_auto_mode_standby(auto_status)
+        return
+
+    panel_pending = len(st.session_state.get('tab3_pending_approvals') or [])
+    matched_pending = len(_collect_pending_for_auto())
+    if panel_pending and not matched_pending:
+        st.caption(
+            f"⚠️ 审批面板有 {panel_pending} 个待审批，但未匹配当前项目 "
+            f"**{project_name or '（未能识别，请重新点「查看状态」）'}** 的 preprod；"
+            "请确认已点「查看状态」且 Job 为「带服务名」或「deploy on Preprod」两类之一"
+        )
+
+    with st.spinner(
+        f"🤖 自动模式：{AUTO_REFRESH_INTERVAL_SECONDS} 秒后刷新"
+        f"（等待当前项目 preprod 审批出现）..."
+    ):
+        time.sleep(AUTO_REFRESH_INTERVAL_SECONDS)
+
+    _refresh_workflows(pipeline_id, api_token)
+    if _approve_pending_from_session():
+        auto_status = get_preprod_auto_mode_status(
+            st.session_state.tab3_workflows,
+            st.session_state.tab3_wf_jobs_map,
+            project_name=project_name,
+        )
+        if auto_status != PREPROD_AUTO_POLLING:
+            _toast_auto_mode_stopped(auto_status)
 
     st.rerun()
 

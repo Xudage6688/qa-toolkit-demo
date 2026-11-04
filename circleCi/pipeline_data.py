@@ -337,12 +337,15 @@ def get_preprod_approval_info(
             if '/' in project_name:
                 project_name = project_name.split('/')[-1]
 
-            project_name_lower = project_name.lower()
+            from circleCi.project_job_match import job_matches_project
 
-            # 查找 job 名称中包含项目名称的 approval
             matched_approvals = [
-                approval for approval in all_preprod_approvals
-                if project_name_lower in approval['job_name_lower']
+                approval
+                for approval in all_preprod_approvals
+                if job_matches_project(
+                    approval.get('job_name', ''),
+                    project_name,
+                )
             ]
 
             if matched_approvals:
