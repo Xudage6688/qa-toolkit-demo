@@ -143,7 +143,7 @@ def test_regression_runner_runs_all_cases_sequentially():
   ]
   call_count = {"n": 0}
 
-  def fake_stream(config_dict):
+  def fake_stream(config_dict, headed=False):
     idx = call_count["n"]
     call_count["n"] += 1
     yield f"log line {idx}"
@@ -176,7 +176,7 @@ def test_regression_runner_stops_on_first_failure_when_stop_on_fail():
   })
   base = BookingConfig(login_type="myqima", booking_type="PSI")
 
-  def fake_stream(config_dict):
+  def fake_stream(config_dict, headed=False):
     yield "log"
     yield BookingResult(success=False, error="login failed")
 

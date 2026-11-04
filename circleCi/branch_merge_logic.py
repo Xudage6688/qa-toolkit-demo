@@ -24,6 +24,28 @@ PR_MERGEABLE_POLL_INTERVAL_SECONDS = 1.0
 # 合并分支统一加此前缀，避免与源分支同名冲突：
 # 已有 refs/heads/feat-SP-35008 时无法再创建 feat-SP-35008/xxx
 MERGE_BRANCH_PREFIX = "merge"
+# 在已有 merge/ 分支上继续合入时，不能用「/新分支」扩展（会与父 ref 冲突），
+# 将新 ticket 用连字符接到最后一段路径上。
+MERGE_BRANCH_CONTINUATION_JOINER = "-"
+# CircleCI 服务名与 GitHub 仓库名不一致时的合分支映射
+MERGE_REPO_OVERRIDES = {
+  "psi-service": "psi",
+}
+
+
+def resolve_merge_repo_name(service: str) -> str:
+  """解析合分支时使用的 GitHub 仓库名
+
+  CircleCI 服务名可能与 GitHub 仓库名不一致，此处做映射。
+
+  Args:
+    service: CircleCI 服务名
+
+  Returns:
+    实际 GitHub 仓库名
+  """
+  name = str(service).strip() if service else ""
+  return MERGE_REPO_OVERRIDES.get(name, name)
 
 
 @dataclass
@@ -74,19 +96,72 @@ def parse_branch_names(text: str) -> List[str]:
   return branches
 
 
+def _merge_branch_path_segments(branch: str) -> List[str]:
+  """将单个分支名展开为合并路径中的段列表
+
+  本工具生成的合并分支以 `merge/` 开头；在已有合并分支上继续合入时，
+  基分支名本身已是 `merge/a/b/c`，应展开为 a、b、c，而不是整段再套一层 merge/。
+
+  Args:
+    branch: 远程分支名
+
+  Returns:
+    路径段列表（非 merge 分支为单元素列表）
+  """
+  name = str(branch).strip()
+  if not name:
+    return []
+  prefix = f"{MERGE_BRANCH_PREFIX}/"
+  if name.startswith(prefix):
+    rest = name[len(prefix):]
+    return [part for part in rest.split("/") if part]
+  return [name]
+
+
+def is_tool_merge_branch(branch: str) -> bool:
+  """判断是否为本工具生成的 merge/ 合并分支名"""
+  name = str(branch).strip()
+  return name.startswith(f"{MERGE_BRANCH_PREFIX}/")
+
+
 def build_merge_branch_name(branches: Sequence[str]) -> str:
   """根据分支列表生成合并分支名
 
   使用 `merge/<branch1>/<branch2>/...`，避免源分支名作为路径前缀时
   与已有分支引用冲突（Git 不允许同时存在 `feat-X` 与 `feat-X/yyy`）。
+  若第一项已是 `merge/...` 且还要继续合入其它分支，则不能用 `/` 再加长路径
+  （会与已有 merge 分支 ref 冲突），改为用 `-` 将新分支名接到最后一段上，例如
+  `merge/A/B/C` + `D` → `merge/A/B/C-D`。
 
   Args:
     branches: 源分支列表
 
   Returns:
-    带 merge/ 前缀、以 '/' 连接的合并分支名
+    带 merge/ 前缀的合并分支名
   """
-  return f"{MERGE_BRANCH_PREFIX}/{'/'.join(branches)}"
+  prefix = f"{MERGE_BRANCH_PREFIX}/"
+  branch_list = [str(b).strip() for b in branches if b and str(b).strip()]
+  if not branch_list:
+    return prefix.rstrip("/")
+
+  first = branch_list[0]
+  if is_tool_merge_branch(first) and len(branch_list) >= 2:
+    base_segments = _merge_branch_path_segments(first)
+    tail_parts: List[str] = []
+    for branch in branch_list[1:]:
+      tail_parts.extend(_merge_branch_path_segments(branch))
+    if base_segments and tail_parts:
+      last_segment = base_segments[-1]
+      for part in tail_parts:
+        last_segment = f"{last_segment}{MERGE_BRANCH_CONTINUATION_JOINER}{part}"
+      combined = base_segments[:-1] + [last_segment]
+      return f"{prefix}{'/'.join(combined)}"
+
+  segments: List[str] = []
+  for branch in branch_list:
+    for part in _merge_branch_path_segments(branch):
+      segments.append(part)
+  return f"{prefix}{'/'.join(segments)}"
 
 
 def is_ref_update_failed_error(message: str) -> bool:
@@ -122,8 +197,9 @@ def build_ref_conflict_tips(merge_branch: str, base_branch: str) -> List[str]:
     "Git 不允许同时存在同名分支与其「子路径」分支"
     f"（例如已有 `{base_branch}`，就不能再创建 `{base_branch}/xxx`）。",
     f"当前目标分支：`{merge_branch}`。",
-    "本工具已使用 `merge/` 前缀规避该问题；若仍失败，请检查是否已有同名合并分支，"
-    "或勾选「覆盖重建」后重试。",
+    "在已有 `merge/` 合并分支上继续合入时，本工具会用 `-` 拼接新 ticket"
+    "（如 `merge/A/B/C-D`），而不会使用 `merge/A/B/C/D`。",
+    "若仍失败，请检查是否已有同名合并分支，或勾选「覆盖重建」后重试；"
     "也可在 GitHub 上手动删除冲突的旧合并分支后再试。",
   ]
 
@@ -139,7 +215,8 @@ def build_github_branch_url(organization: str, service: str, branch: str) -> str
   Returns:
     分支页面 URL
   """
-  return f"https://github.com/{organization}/{service}/tree/{branch}"
+  repo = resolve_merge_repo_name(service)
+  return f"https://github.com/{organization}/{repo}/tree/{branch}"
 
 
 def build_conflict_tips(
@@ -262,7 +339,7 @@ def merge_service_branches(
   pr_urls: List[str] = []
 
   try:
-    report(f"远程仓库: {org}/{service_name}（无本地 clone）")
+    report(f"远程仓库: {org}/{resolve_merge_repo_name(service_name)}（无本地 clone）")
 
     report("校验远程源分支是否存在...")
     missing = []
@@ -424,7 +501,8 @@ def _repo_api(organization: str, service: str, path: str = "") -> str:
   Returns:
     完整 API URL
   """
-  base = f"{GITHUB_API_BASE}/repos/{organization}/{service}"
+  repo = resolve_merge_repo_name(service)
+  base = f"{GITHUB_API_BASE}/repos/{organization}/{repo}"
   return f"{base}/{path}" if path else base
 
 

@@ -57,6 +57,7 @@ class MyqimaRegressionRunner:
     cases: list[RegressionCase],
     base_config: BookingConfig,
     stop_on_fail: bool = False,
+    headed: bool = False,
   ) -> Iterator[ProgressEvent]:
     start = time.monotonic()
     case_results: list[RegressionCaseResult] = []
@@ -68,7 +69,7 @@ class MyqimaRegressionRunner:
       logs: list[str] = []
       result = BookingResult(success=False, error="No result returned")
 
-      for item in self._booking_runner.stream(config.to_dict()):
+      for item in self._booking_runner.stream(config.to_dict(), headed=headed):
         if isinstance(item, str):
           logs.append(item)
           yield item

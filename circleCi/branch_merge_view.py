@@ -12,6 +12,7 @@ from circleCi.branch_merge_logic import (
   build_merge_branch_name,
   merge_service_branches,
   parse_branch_names,
+  resolve_merge_repo_name,
 )
 from circleCi.pipeline_config import get_services_list
 from modules.components import copyable_text
@@ -48,7 +49,8 @@ def render_branch_merge_tab(
 
   st.caption(
     "💡 冲突时会自动创建 GitHub PR，可在网页上解决冲突后再 Merge。"
-    " 合并分支名带 `merge/` 前缀，避免与源分支路径冲突。"
+    " 合并分支名带 `merge/` 前缀；在已有 merge 分支上续合时，新 ticket 用 `-` 接在最后一段"
+    "（Git 不允许 `merge/A/B` 与 `merge/A/B/C` 并存）。"
   )
 
   st.markdown("---")
@@ -110,7 +112,7 @@ def render_branch_merge_tab(
         st.write(f"**基分支:** `{branches[0]}`")
         st.write(f"**合并顺序:** {' → '.join(f'`{b}`' for b in branches)}")
         st.write(f"**目标合并分支:** `{merge_branch_name}`")
-        st.caption(f"远程路径: `github.com/{organization}/{service}`")
+        st.caption(f"远程路径: `github.com/{organization}/{resolve_merge_repo_name(service)}`")
 
   opt_col1, opt_col2 = st.columns(2)
   with opt_col1:

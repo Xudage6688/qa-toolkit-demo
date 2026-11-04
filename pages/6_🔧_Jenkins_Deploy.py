@@ -16,6 +16,12 @@ sys.path.insert(0, str(project_root))
 
 from modules.user_config_loader import get_jenkins_config, get_user_config_loader, build_jenkins_auth
 
+try:
+    from streamlit_cookies_manager import EncryptedCookieManager
+    COOKIES_AVAILABLE = True
+except ImportError:
+    COOKIES_AVAILABLE = False
+
 st.set_page_config(
     page_title="Jenkins 部署",
     page_icon="🔧",
@@ -46,6 +52,36 @@ if "current_user" not in st.session_state or not st.session_state.current_user:
 current_user = st.session_state.current_user
 user_jenkins_cfg = get_jenkins_config(current_user)
 
+cookies = None
+if COOKIES_AVAILABLE:
+    cookies = EncryptedCookieManager(
+        prefix="jenkins_deploy_" + current_user + "_",
+        password="jenkins-deploy-" + current_user + "-cookie-key"
+    )
+    if not cookies.ready():
+        st.stop()
+
+config_username = user_jenkins_cfg.get("username", "") if user_jenkins_cfg else ""
+config_token = user_jenkins_cfg.get("api_token", "") if user_jenkins_cfg else ""
+config_url = user_jenkins_cfg.get("jenkins_url", JENKINS_URL_DEFAULT) if user_jenkins_cfg else JENKINS_URL_DEFAULT
+saved_username = cookies.get("username", "") if cookies else ""
+saved_token = cookies.get("api_token", "") if cookies else ""
+saved_url = cookies.get("jenkins_url", "") if cookies else ""
+if not saved_username:
+    saved_username = config_username
+if not saved_token:
+    saved_token = config_token
+if not saved_url:
+    saved_url = config_url
+
+def saveJenkinsCredentials(username: str, api_token: str, jenkins_url: str) -> None:
+    if not cookies or not api_token:
+        return
+    cookies["username"] = username
+    cookies["api_token"] = api_token
+    cookies["jenkins_url"] = jenkins_url
+    cookies.save()
+
 # ── Session State 初始化 ──────────────────────────────────────────
 defaults = {
     "jenkins_logs": [],
@@ -54,9 +90,9 @@ defaults = {
     "jenkins_done": False,
     "jenkins_deploy_mode": "sequential",
     "jenkins_services_branches": {},
-    "jenkins_username_input": user_jenkins_cfg.get("username", "") if user_jenkins_cfg else "",
-    "jenkins_token_input": user_jenkins_cfg.get("api_token", "") if user_jenkins_cfg else "",
-    "jenkins_url_saved": user_jenkins_cfg.get("jenkins_url", JENKINS_URL_DEFAULT) if user_jenkins_cfg else JENKINS_URL_DEFAULT,
+    "jenkins_username_input": saved_username,
+    "jenkins_token_input": saved_token,
+    "jenkins_url_saved": saved_url,
     "jenkins_test_logs": [],
     "jenkins_test_running": False,
     # Prod tab 专用
@@ -563,6 +599,10 @@ with st.sidebar:
                 item = test_q.get_nowait()
                 if isinstance(item, tuple) and item[0] == "__TEST_DONE__":
                     st.session_state.jenkins_test_running = False
+                    if item[1]:
+                        saveJenkinsCredentials(
+                            jenkins_user_val, jenkins_token_val, jenkins_url_val
+                        )
                 else:
                     st.session_state.jenkins_test_logs.append(str(item))
             except Exception:
@@ -589,15 +629,31 @@ with st.sidebar:
                 st.error(f"❌ {svc}")
 
 
-# ── 主体 Tab ─────────────────────────────────────────────────────
+# ── 主体导航（单选渲染，避免 st.tabs 多面板叠显）────────────────
 prod_tab_label = "🏭 生产环境部署" if PROD_DEPLOY_ENABLED else "🏭 生产环境（调试）"
-tab_pp, tab_prod = st.tabs(["🔧 PP 环境部署", prod_tab_label])
+JENKINS_TAB_PP = "🔧 PP 环境部署"
+JENKINS_TAB_OPTIONS = [JENKINS_TAB_PP, prod_tab_label]
+
+if "jenkins_active_tab" not in st.session_state:
+    st.session_state.jenkins_active_tab = JENKINS_TAB_OPTIONS[0]
+if st.session_state.jenkins_active_tab not in JENKINS_TAB_OPTIONS:
+    st.session_state.jenkins_active_tab = JENKINS_TAB_OPTIONS[0]
+
+active_tab = st.segmented_control(
+    "功能导航",
+    options=JENKINS_TAB_OPTIONS,
+    key="jenkins_active_tab",
+    label_visibility="collapsed",
+    required=True,
+    width="stretch"
+)
+st.markdown("---")
 
 
 # ════════════════════════════════════════════════════════════════
 # Tab 1：PP 环境部署
 # ════════════════════════════════════════════════════════════════
-with tab_pp:
+if active_tab == JENKINS_TAB_PP:
     st.subheader("🎯 PP 环境部署配置")
     col_left, col_right = st.columns([3, 2])
 
@@ -614,7 +670,7 @@ with tab_pp:
                     key=f"branch_{svc}"
                 )
             with svc_col_btn:
-                st.markdown("<div style='padding-top:28px'></div>", unsafe_allow_html=True)
+                st.write("")
                 fetch_clicked = st.button(
                     "查最新",
                     key=f"fetch_btn_{svc}",
@@ -747,7 +803,7 @@ with tab_pp:
                     st.session_state.jenkins_deploying = False
                     st.session_state.jenkins_done = True
                 else:
-                    st.session_state.jenkins_logs.append(str(item))
+                    st.session_state.jenkins_logs.append(f"[{datetime.now().strftime('%H:%M:%S')}] {item}")
             except Exception:
                 break
 
@@ -792,7 +848,7 @@ with tab_pp:
 # ════════════════════════════════════════════════════════════════
 # Tab 2：生产环境（调试专用，部署功能锁定）
 # ════════════════════════════════════════════════════════════════
-with tab_prod:
+elif active_tab == prod_tab_label:
     # 顶部醒目警告
     st.error(
         "🔒 **生产环境 — 部署功能当前已锁定**\n\n"
@@ -956,7 +1012,7 @@ with tab_prod:
                         st.session_state.prod_deploying = False
                         st.session_state.prod_deploy_done = True
                     else:
-                        st.session_state.prod_deploy_logs.append(str(item))
+                        st.session_state.prod_deploy_logs.append(f"[{datetime.now().strftime('%H:%M:%S')}] {item}")
                 except Exception:
                     break
 

@@ -7,6 +7,7 @@ from circleCi.branch_merge_logic import (
   build_merge_branch_name,
   merge_service_branches,
   parse_branch_names,
+  resolve_merge_repo_name,
 )
 
 
@@ -55,6 +56,20 @@ class TestBuildMergeBranchName:
     )
     assert not name.startswith("feat-SP-35008/")
 
+  def test_continue_on_existing_merge_branch(self):
+    """在已有 merge/ 合并分支上继续合入：用 - 扩展，避免子路径 ref 冲突"""
+    existing = "merge/SP-35171/SS-218/SS-308-SP-37420"
+    name = build_merge_branch_name([existing, "SP-37450"])
+    assert name == "merge/SP-35171/SS-218/SS-308-SP-37420-SP-37450"
+    assert not name.startswith("merge/merge/")
+    assert "/SP-37450" not in name
+
+  def test_continue_merge_multiple_new_branches(self):
+    """一次合入多个新分支时连字符串联"""
+    existing = "merge/A/B"
+    name = build_merge_branch_name([existing, "C", "D"])
+    assert name == "merge/A/B-C-D"
+
 
 class TestBuildConflictTips:
   """测试冲突提示"""
@@ -72,6 +87,20 @@ def test_build_github_branch_url():
   """GitHub URL 构建"""
   url = build_github_branch_url("your-org", "aca-new", "SP-1/SP-2")
   assert url == "https://github.com/your-org/aca-new/tree/SP-1/SP-2"
+
+
+class TestResolveMergeRepoName:
+  """test merge repo mapping"""
+
+  def test_psi_service_maps_to_psi(self):
+    assert resolve_merge_repo_name("psi-service") == "psi"
+
+  def test_unknown_service_unchanged(self):
+    assert resolve_merge_repo_name("aca-new") == "aca-new"
+
+  def test_build_github_branch_url_uses_mapping(self):
+    url = build_github_branch_url("your-org", "psi-service", "merge/SP-1/SP-2")
+    assert url == "https://github.com/your-org/psi/tree/merge/SP-1/SP-2"
 
 
 def _mock_response(status_code: int, payload=None, text: str = ""):
