@@ -5,7 +5,7 @@ CircleCI Pipeline 业务逻辑模块
 from typing import Dict, Any, Optional, List, Tuple
 import requests
 import time
-from datetime import datetime
+from datetime import datetime, timezone, timedelta
 from concurrent.futures import ThreadPoolExecutor, as_completed
 import logging
 
@@ -135,7 +135,7 @@ def convert_utc_to_beijing(utc_time_str: str) -> str:
     """将 UTC 时间转换为北京时间"""
     try:
         utc_time = datetime.fromisoformat(utc_time_str.replace('Z', '+00:00'))
-        beijing_time = utc_time.astimezone()
+        beijing_time = utc_time.astimezone(timezone(timedelta(hours=8)))
         return beijing_time.strftime('%Y-%m-%d %H:%M:%S')
     except Exception:
         return utc_time_str

@@ -18,7 +18,7 @@ if 'modules.jira_operations_helper' in sys.modules:
   importlib.reload(sys.modules['modules.jira_operations_helper'])
 
 from modules.jira_operations_helper import JiraOperationsClient, FALLBACK_CONFIG
-from modules.user_config_loader import get_jira_config, get_user_config_loader, build_jira_auth_headers
+from modules.user_config_loader import get_user_config_loader, build_jira_auth_headers
 from modules.test_case_importer import render_test_case_importer_tab
 
 
@@ -37,20 +37,11 @@ st.set_page_config(
   layout="wide"
 )
 
-# 检查当前用户
-if 'current_user' not in st.session_state or not st.session_state.current_user:
-  st.error("❌ 未选择使用者，请返回主页选择你的身份")
-  st.stop()
+# 检查当前用户并加载 Jira 配置
+from modules.page_common import require_current_user, require_user_config
 
-current_user = st.session_state.current_user
-
-# 从用户配置加载 Jira 配置
-user_jira_config = get_jira_config(current_user)
-
-if not user_jira_config:
-  st.error(f"❌ 未找到用户 {current_user} 的 Jira 配置")
-  st.info("请联系管理员在 config/users_config.json 中配置你的信息")
-  st.stop()
+current_user = require_current_user()
+user_jira_config = require_user_config(current_user, "jira")
 
 # 配置信息
 base_url = user_jira_config.get('base_url', 'https://your-jira.atlassian.net')
@@ -556,8 +547,8 @@ except Exception as e:
 
 # 获取元数据（缓存，但可以通过 TTL 刷新）
 @st.cache_data(ttl=300)  # 5分钟缓存
-def get_metadata(_client: JiraOperationsClient, project_key: str = "SP") -> Dict:
-  """获取创建 Issue 的元数据"""
+def get_metadata(_client: JiraOperationsClient, project_key: str = "SP", cache_user: str = "") -> Dict:
+  """获取创建 Issue 的元数据（cache_user 参与缓存键，避免多用户串号）"""
   return _client.get_create_metadata(project_key)
 
 # 添加清除缓存按钮
@@ -575,7 +566,7 @@ with col2:
     st.sidebar.success("✅ Sprint 缓存已清除")
     st.rerun()
 
-metadata = get_metadata(jira_client, "SP")
+metadata = get_metadata(jira_client, "SP", cache_user=current_user)
 
 # 显示是否使用 fallback
 if metadata.get('using_fallback'):
@@ -643,7 +634,7 @@ if operation == "创建 Ticket":
   
   # 获取 Sprints（带缓存）- 定义在这里以确保 jira_client 已初始化
   @st.cache_data(ttl=300)
-  def get_team_sprints(team: Optional[str]) -> List[Dict]:
+  def get_team_sprints(team: Optional[str], cache_user: str = "") -> List[Dict]:
     """获取 Team 的 Active Sprints"""
     try:
       return jira_client.get_sprints_by_team(team)
@@ -742,7 +733,7 @@ if operation == "创建 Ticket":
         else:
           # 清除缓存并重新获取
           get_team_sprints.clear()
-          fresh_sprints = get_team_sprints(selected_team)
+          fresh_sprints = get_team_sprints(selected_team, cache_user=current_user)
           st.session_state.available_sprints = fresh_sprints
           
           if fresh_sprints:

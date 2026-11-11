@@ -18,7 +18,7 @@
 pip install -r requirements.txt
 
 # 2. Configure user credentials
-# Copy config/users_config.example.json to config/users_config.json
+# Copy config/users_config_example.json to config/users_config.json
 # Edit with your API tokens
 
 # 3. Start application

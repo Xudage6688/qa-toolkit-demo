@@ -8,6 +8,8 @@ from concurrent.futures import ThreadPoolExecutor, as_completed
 from typing import Optional
 
 import requests
+from requests.adapters import HTTPAdapter
+from urllib3.util.retry import Retry
 
 from modules.user_config_loader import build_circleci_headers
 
@@ -16,8 +18,16 @@ logger = logging.getLogger(__name__)
 # CircleCI API 基础 URL
 CIRCLECI_API_BASE = 'https://circleci.com/api/v2'
 
-# 全局 Session（连接复用，Keep-Alive）
+# 全局 Session（连接复用，Keep-Alive；429/5xx 自动重试退避）
 _http_session = requests.Session()
+_retry = Retry(
+    total=3,
+    backoff_factor=1,
+    status_forcelist=[429, 500, 502, 503],
+    allowed_methods=["GET", "POST"],
+)
+_http_session.mount('https://', HTTPAdapter(max_retries=_retry))
+_http_session.mount('http://', HTTPAdapter(max_retries=_retry))
 
 
 def get_http_session() -> requests.Session:
@@ -237,7 +247,7 @@ def search_pipelines_by_revision(
         if workflows:
             from circleCi.pipeline_data import get_all_approvals_info_with_workflows
             all_approvals_info = get_all_approvals_info_with_workflows(
-                workflows, _fetch_workflow_jobs_concurrent([w.get('id') for w in workflows if w.get('id')], api_token=api_token)
+                workflows, _fetch_workflow_jobs_concurrent([w.get('id') for w in workflows if w.get('id')], api_token=api_token), api_token=api_token
             )
 
         if show_progress and all_approvals_info:

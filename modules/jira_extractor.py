@@ -3,10 +3,12 @@ import requests
 import json
 import csv
 import os
-import logging
 import re
+from pathlib import Path
 from datetime import datetime
 from typing import List, Dict, Optional
+# 项目映射配置文件（读写统一路径）
+PROJECT_MAPPING_FILE = "config/project_mapping.json"
 
 # 为 Streamlit 环境创建安全的日志记录器
 class SafeLogger:
@@ -72,8 +74,8 @@ class JiraExtractor:
 
     def _load_project_mappings(self) -> Dict[str, List[str]]:
         """加载项目映射配置"""
+        mapping_file = PROJECT_MAPPING_FILE
         try:
-            mapping_file = "config/project_mapping.json"
             if os.path.exists(mapping_file):
                 with open(mapping_file, 'r', encoding='utf-8') as f:
                     config = json.load(f)
@@ -153,8 +155,7 @@ class JiraExtractor:
             logger.info(f"尝试使用增强 JQL 搜索 API...")
             logger.info(f"URL: {url}")
             logger.info(f"JQL: {jql}")
-            
-            response = self.session.post(url, json=payload)
+            response = self.session.post(url, json=payload, timeout=30)
             
             if response.status_code == 410:
                 logger.warning(f"增强 JQL API 返回 410 Gone，尝试传统 API...")
@@ -211,8 +212,7 @@ class JiraExtractor:
                     'startAt': 0
                 }
                 
-                logger.info(f"尝试传统 API v{api_version}...")
-                response = self.session.get(url, params=params)
+                response = self.session.get(url, params=params, timeout=30)
                 
                 if response.status_code == 410:
                     logger.warning(f"传统 API v{api_version} 返回 410 Gone")
@@ -364,8 +364,7 @@ class JiraExtractor:
                     'maxResults': 10,
                     'startAt': 0
                 }
-                
-                response = self.session.get(url, params=params)
+                response = self.session.get(url, params=params, timeout=30)
                 response.raise_for_status()
                 issues = response.json().get('issues', [])
             
@@ -380,8 +379,7 @@ class JiraExtractor:
                     issue_key = issue.get('key', '')
                     issue_url = f"{self.base_url}/rest/api/3/issue/{issue_key}?expand=names"
                     
-                    # 正确处理响应对象
-                    issue_response = self.session.get(issue_url)
+                    issue_response = self.session.get(issue_url, timeout=30)
                     issue_response.raise_for_status()
                     issue_data = issue_response.json()
                     
@@ -578,8 +576,7 @@ class JiraExtractor:
                 "version": "1.1.0",
                 "last_updated": datetime.now().strftime("%Y-%m-%d")
             }
-            
-            with open("project_mapping.json", "w", encoding="utf-8") as f:
+            with open(PROJECT_MAPPING_FILE, "w", encoding="utf-8") as f:
                 json.dump(config, f, ensure_ascii=False, indent=2)
             
             # 更新内存中的配置

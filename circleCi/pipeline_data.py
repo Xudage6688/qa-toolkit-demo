@@ -98,7 +98,8 @@ def approve_job(
 
 def get_all_approvals_info_with_workflows(
     workflows: list,
-    wf_jobs_map: dict
+    wf_jobs_map: dict,
+    api_token: Optional[str] = None
 ) -> dict:
     """获取 Pipeline 中所有环境的 approval 信息（给定 workflows 和 jobs）
 
@@ -107,6 +108,7 @@ def get_all_approvals_info_with_workflows(
     Args:
         workflows: workflow 列表
         wf_jobs_map: workflow_id -> jobs 列表的映射
+        api_token: API Token
 
     Returns:
         dict: 按环境名组织的 approval 信息字典
@@ -158,7 +160,7 @@ def get_all_approvals_info_with_workflows(
                     if approved_by_data.count('-') >= 4:
                         # UUID 格式，查询用户名
                         logger.debug(f"Fetching user info for UUID: {approved_by_data}")
-                        approver_name = get_user_info_by_id(approved_by_data)
+                        approver_name = get_user_info_by_id(approved_by_data, api_token=api_token)
                         if approver_name:
                             logger.debug(f"Found username: {approver_name}")
                     else:
@@ -223,8 +225,7 @@ def get_all_approvals_info(
         from circleCi.pipeline_api import _fetch_workflow_jobs_concurrent
         workflow_ids = [w.get('id') for w in workflows]
         all_jobs_map = _fetch_workflow_jobs_concurrent(workflow_ids, api_token=api_token)
-
-        return get_all_approvals_info_with_workflows(workflows, all_jobs_map)
+        return get_all_approvals_info_with_workflows(workflows, all_jobs_map, api_token=api_token)
 
     except Exception as e:
         return {'error': {'error': str(e), 'status': 'error', 'approved_by': 'Error', 'approved_at': None}}

@@ -9,11 +9,7 @@
 """
 
 import pytest
-import sys
-import os
 
-# 添加 modules 路径
-sys.path.insert(0, os.path.dirname(os.path.dirname(os.path.abspath(__file__))))
 
 from modules._services_images_logic import (
     calculateRemainingServices,

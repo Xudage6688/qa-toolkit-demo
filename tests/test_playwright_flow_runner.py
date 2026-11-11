@@ -1,10 +1,8 @@
 """Tests for Playwright flow runner (Test Tools)."""
 import os
-import sys
 import tempfile
 from pathlib import Path
 
-sys.path.insert(0, os.path.join(os.path.dirname(__file__), ".."))
 
 from modules._test_tools._playwright_flow_runner import PlaywrightFlowRunner
 

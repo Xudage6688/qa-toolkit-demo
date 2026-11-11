@@ -1,8 +1,8 @@
 # QA DevOps Toolkit
 
 ![Python](https://img.shields.io/badge/Python-3.8%2B-blue)
-![Streamlit](https://img.shields.io/badge/Streamlit-1.28%2B-orange)
-![Test Coverage](https://img.shields.io/badge/Coverage-87%25-green)
+![Streamlit](https://img.shields.io/badge/Streamlit-1.32%2B-orange)
+![CI](https://github.com/Xudage6688/qa-toolkit-demo/actions/workflows/ci.yml/badge.svg)
 ![License](https://img.shields.io/badge/License-MIT-yellow)
 
 > 📖 **Languages:** [English](./README.md) | [中文](./README.zh.md)
@@ -30,7 +30,8 @@
 ### Install Dependencies
 
 ```bash
-pip install -r requirements.txt
+pip install -r requirements.txt        # 运行时依赖
+pip install -r requirements-dev.txt   # 测试依赖（pytest / pytest-cov）
 ```
 
 ### Run the Application
@@ -85,6 +86,8 @@ Edit `config/users_config_example.json` to configure authentication credentials 
 ```
 
 Service list configuration: Edit `config/circleci-services.txt`, one CircleCI service name per line.
+
+myQIMA test account presets (optional): copy `config/myqima_test_accounts.example.json` to `config/myqima_test_accounts.json` and fill in real test accounts. The latter is gitignored; when absent, the Test Tools page falls back to manual entry.
 
 ---
 

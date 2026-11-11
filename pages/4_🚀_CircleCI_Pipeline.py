@@ -13,7 +13,7 @@ from circleCi.batch_ops_view import render_batch_ops_tab
 from circleCi.branch_merge_view import render_branch_merge_tab
 
 # 导入用户配置
-from modules.user_config_loader import get_circleci_config, get_user_config_loader
+from modules.user_config_loader import get_user_config_loader
 
 # 页面配置
 st.set_page_config(
@@ -22,20 +22,11 @@ st.set_page_config(
     layout="wide"
 )
 
-# 检查当前用户
-if 'current_user' not in st.session_state or not st.session_state.current_user:
-    st.error("❌ 未选择使用者，请返回主页选择你的身份")
-    st.stop()
+# 检查当前用户并加载 CircleCI 配置
+from modules.page_common import require_current_user, require_user_config
 
-current_user = st.session_state.current_user
-
-# 从用户配置加载CircleCI配置
-user_circleci_config = get_circleci_config(current_user)
-
-if not user_circleci_config:
-    st.error(f"❌ 未找到用户 {current_user} 的 CircleCI 配置")
-    st.info("请联系管理员在 config/users_config.json 中配置你的信息")
-    st.stop()
+current_user = require_current_user()
+user_circleci_config = require_user_config(current_user, "circleci")
 
 # 使用用户配置
 CIRCLECI_API_TOKEN = user_circleci_config.get('api_token', '')

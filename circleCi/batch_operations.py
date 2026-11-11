@@ -5,6 +5,8 @@
 from typing import List, Dict, Tuple, Optional
 from concurrent.futures import ThreadPoolExecutor, as_completed
 import requests
+from requests.adapters import HTTPAdapter
+from urllib3.util.retry import Retry
 import logging
 
 from modules.user_config_loader import build_circleci_headers, parse_api_error_message
@@ -18,8 +20,16 @@ CIRCLECI_API_BASE = 'https://circleci.com/api/v2'
 DEFAULT_TIMEOUT_SECONDS = 30
 QUICK_TIMEOUT_SECONDS = 15
 
-# 模块级 Session 用于连接池复用
+# 模块级 Session 用于连接池复用（429/5xx 自动重试退避）
 _session = requests.Session()
+_retry = Retry(
+    total=3,
+    backoff_factor=1,
+    status_forcelist=[429, 500, 502, 503],
+    allowed_methods=["GET", "POST"],
+)
+_session.mount('https://', HTTPAdapter(max_retries=_retry))
+_session.mount('http://', HTTPAdapter(max_retries=_retry))
 
 
 def _handle_request_error(operation: str, e: Exception, context: Dict) -> Dict:

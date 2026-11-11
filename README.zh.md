@@ -86,6 +86,8 @@ http://localhost:9999
 
 服务列表配置：编辑 `config/circleci-services.txt`，每行一个 CircleCI 服务名称。
 
+myQIMA 测试账号预置（可选）：复制 `config/myqima_test_accounts.example.json` 为 `config/myqima_test_accounts.json` 并填入真实测试账号。后者已 gitignore；文件不存在时，测试工具页回退为手动输入。
+
 ---
 
 ## 功能截图

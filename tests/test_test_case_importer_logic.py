@@ -4,12 +4,8 @@ tests/test_test_case_importer_logic.py
 """
 
 import pytest
-import sys
-from pathlib import Path
 from unittest.mock import MagicMock, patch
 
-project_root = Path(__file__).parent.parent
-sys.path.insert(0, str(project_root))
 
 from modules._test_case_importer_logic import (
     authenticate_xray,

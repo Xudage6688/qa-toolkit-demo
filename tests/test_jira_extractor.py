@@ -4,7 +4,6 @@ tests/test_jira_extractor.py
 """
 
 import pytest
-import sys
 import os
 import tempfile
 import json
@@ -12,8 +11,6 @@ from pathlib import Path
 from unittest.mock import patch, MagicMock, Mock
 from datetime import datetime
 
-project_root = Path(__file__).parent.parent
-sys.path.insert(0, str(project_root))
 
 from modules.jira_extractor import JiraExtractor, SafeLogger
 

@@ -33,7 +33,7 @@
 4. **Configure user credentials**
    ```bash
    # Copy example config
-   cp config/users_config.example.json config/users_config.json
+   cp config/users_config_example.json config/users_config.json
    
    # Edit with your credentials
    ```
@@ -64,7 +64,7 @@
 
 ### User Configuration (`config/users_config.json`)
 
-See `config/users_config.example.json` for the full configuration template.
+See `config/users_config_example.json` for the full configuration template.
 
 Key sections:
 - **jira**: API token, base URL, filter ID, field ID
@@ -135,7 +135,7 @@ qa-toolkit-demo/
 ├── CONTRIBUTING.md                  # Contribution guide
 ├── .streamlit/config.toml            # Streamlit server config (port 9999)
 ├── config/                          # Configuration files
-│   ├── users_config.example.json    # User config template
+│   ├── users_config_example.json     # User config template
 │   └── argocd_config.example.json    # ArgoCD config template
 ├── pages/                           # Streamlit multi-page app
 │   ├── 1_📊_Jira_Affects_Project.py

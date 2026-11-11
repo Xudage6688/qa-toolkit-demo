@@ -4,15 +4,12 @@ tests/test_user_config_loader.py
 """
 
 import pytest
-import sys
 import os
 import tempfile
 import json
 from pathlib import Path
 from unittest.mock import patch, MagicMock
 
-project_root = Path(__file__).parent.parent
-sys.path.insert(0, str(project_root))
 
 from modules.user_config_loader import (
     UserConfigLoader,

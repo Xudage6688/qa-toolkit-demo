@@ -9,26 +9,17 @@ import sys
 sys.path.append(os.path.dirname(os.path.dirname(os.path.abspath(__file__))))
 
 from modules.jira_extractor import JiraExtractor
-from modules.user_config_loader import get_jira_config, get_user_config_loader
+from modules.user_config_loader import get_user_config_loader
 from modules.components import copy_button
 from modules._affects_projects_grouping_logic import group_projects_by_sp_team
 
 st.set_page_config(page_title="Jira Affects Project 提取工具", layout="wide")
 
-# 检查当前用户
-if 'current_user' not in st.session_state or not st.session_state.current_user:
-    st.error("❌ 未选择使用者，请返回主页选择你的身份")
-    st.stop()
+# 检查当前用户并加载 JIRA 配置
+from modules.page_common import require_current_user, require_user_config
 
-current_user = st.session_state.current_user
-
-# 从用户配置加载JIRA配置
-user_jira_config = get_jira_config(current_user)
-
-if not user_jira_config:
-    st.error(f"❌ 未找到用户 {current_user} 的 JIRA 配置")
-    st.info("请联系管理员在 config/users_config.json 中配置你的信息")
-    st.stop()
+current_user = require_current_user()
+user_jira_config = require_user_config(current_user, "jira")
 
 # 配置直接从 users_config.json 加载（统一配置管理）
 JIRA_CONFIG = {

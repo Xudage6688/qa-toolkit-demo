@@ -7,12 +7,8 @@
 - selectApprovalJob: 从 job 列表中挑出目标环境已审批的 job
 """
 
-import os
-import sys
-
 import pytest
 
-sys.path.insert(0, os.path.dirname(os.path.dirname(os.path.abspath(__file__))))
 
 from modules._services_approver_logic import (
     buildProjectCandidates,
