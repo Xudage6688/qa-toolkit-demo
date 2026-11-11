@@ -6,7 +6,7 @@ HTTP 层（header 构造、Session 复用、超时、重试）由 call_circleci_
 import time
 import sys
 
-from circleCi.pipeline_api import call_circleci_api, CIRCLECI_API_BASE
+from circleCi.pipeline_api import call_circleci_api
 
 
 def _report_error(silent, message):
@@ -135,7 +135,7 @@ def format_status(status):
     return display_text, emoji
 
 
-def monitor_pipeline(pipeline_id, check_interval=5, max_duration=None):
+def monitor_pipeline(pipeline_id, check_interval=5, max_duration=None, api_token=None):
     """
     持续监控pipeline状态
 
@@ -177,7 +177,7 @@ def monitor_pipeline(pipeline_id, check_interval=5, max_duration=None):
                 break
 
             # 获取pipeline基本信息
-            pipeline_data = get_pipeline_status(pipeline_id, silent=True)
+            pipeline_data = get_pipeline_status(pipeline_id, silent=True, api_token=api_token)
 
             if not pipeline_data:
                 # 只在第一次失败或每10次检查失败时显示错误信息
@@ -190,7 +190,7 @@ def monitor_pipeline(pipeline_id, check_interval=5, max_duration=None):
             pipeline_state = pipeline_data.get('state', 'unknown')
 
             # 优先获取workflow状态（实际构建状态）
-            workflow_status = get_workflow_status(pipeline_id, silent=True)
+            workflow_status = get_workflow_status(pipeline_id, silent=True, api_token=api_token)
 
             # 使用workflow状态，如果没有则使用pipeline状态
             if workflow_status:
@@ -291,7 +291,7 @@ def monitor_by_pipeline_number(project_slug, pipeline_number, check_interval=5, 
         print(f"❌ 未找到Pipeline #{pipeline_number}")
         return None
 
-    return monitor_pipeline(pipeline_id, check_interval, max_duration)
+    return monitor_pipeline(pipeline_id, check_interval, max_duration, api_token=api_token)
 
 
 def main():
@@ -338,6 +338,13 @@ def main():
     )
 
     parser.add_argument(
+        '--token',
+        type=str,
+        default=None,
+        help='CircleCI API Token（默认读取 config/circleci_config.json）'
+    )
+
+    parser.add_argument(
         '-m', '--max-duration',
         type=int,
         help='最大监控时长（秒），默认无限制'
@@ -348,10 +355,10 @@ def main():
     # 确定使用哪种方式监控
     if args.pipeline_id:
         # 使用Pipeline ID
-        monitor_pipeline(args.pipeline_id, args.interval, args.max_duration)
+        monitor_pipeline(args.pipeline_id, args.interval, args.max_duration, api_token=args.token)
     elif args.pipeline_number and args.project:
         # 使用Pipeline Number和Project
-        monitor_by_pipeline_number(args.project, args.pipeline_number, args.interval, args.max_duration)
+        monitor_by_pipeline_number(args.project, args.pipeline_number, args.interval, args.max_duration, api_token=args.token)
     else:
         print("❌ 错误: 必须提供以下参数之一:")
         print("  1. --pipeline-id (-i) <pipeline-id>")

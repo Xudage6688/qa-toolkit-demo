@@ -3,6 +3,7 @@ config/users_config.json
 config/jira_config.json
 config/circleci-services.txt
 config/myqima_test_accounts.json
+config/project_mapping.json
 
 # Python
 __pycache__/

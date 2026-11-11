@@ -26,7 +26,7 @@ _retry = Retry(
     total=3,
     backoff_factor=1,
     status_forcelist=[429, 500, 502, 503],
-    allowed_methods=["GET", "POST"],
+    allowed_methods=["GET"],
 )
 _session.mount('https://', HTTPAdapter(max_retries=_retry))
 _session.mount('http://', HTTPAdapter(max_retries=_retry))

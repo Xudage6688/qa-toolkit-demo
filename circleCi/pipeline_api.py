@@ -24,7 +24,7 @@ _retry = Retry(
     total=3,
     backoff_factor=1,
     status_forcelist=[429, 500, 502, 503],
-    allowed_methods=["GET", "POST"],
+    allowed_methods=["GET"],
 )
 _http_session.mount('https://', HTTPAdapter(max_retries=_retry))
 _http_session.mount('http://', HTTPAdapter(max_retries=_retry))
@@ -61,6 +61,10 @@ def call_circleci_api(
         - 仅当 error_info 为 None 且 response 非 None 时，response 才可安全使用
     """
     url = f"{CIRCLECI_API_BASE}/{endpoint}"
+    if not api_token:
+        # 未显式提供 token 时回退到配置文件中的 token（保持「不提供则用配置文件」契约）
+        from circleCi.config_loader import CIRCLECI_API_TOKEN as _config_token
+        api_token = _config_token or None
     headers = build_circleci_headers(api_token)
 
     # timeout 增大至 30s，因为长分支名 URL 编码后请求可能较慢

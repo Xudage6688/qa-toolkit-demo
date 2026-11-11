@@ -2,6 +2,7 @@
 import json
 import os
 import tempfile
+from pathlib import Path
 from unittest.mock import patch, MagicMock
 
 
@@ -31,11 +32,13 @@ def test_build_ppsso_url():
   assert url == "https://ppsso.example.com/back-office/v2/company-profile/customer/74CA94F460EC470499DCDADC7CB7C001"
 
 
-def test_load_myqima_test_account_presets_from_repo_file():
-  presets = loadMyqimaTestAccountPresets()
+def test_load_myqima_test_account_presets_from_example_template():
+  # example 模板：文件缺失（gitignored）时回退空列表；给定 example 路径可正常解析
+  assert loadMyqimaTestAccountPresets() == []
+  example_path = Path(__file__).parent.parent / "config" / "myqima_test_accounts.example.json"
+  presets = loadMyqimaTestAccountPresets(cfgPath=example_path)
   assert len(presets) >= 1
-  labels = {p["label"] for p in presets}
-  assert "test_qa" in labels
+  assert "YOUR_TEST_ACCOUNT_USERNAME" in {p["username"] for p in presets}
 
 
 def test_myqima_test_account_preset_helpers():
